@@ -1,0 +1,25 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+var jsx_runtime_1 = require("react/jsx-runtime");
+var react_1 = require("react");
+var framer_motion_1 = require("framer-motion");
+var CartContext_1 = require("../../contexts/CartContext");
+var react_router_dom_1 = require("react-router-dom");
+require("./CartWidget.css");
+var CartWidget = function () {
+    var _a = (0, CartContext_1.useCart)(), cartItems = _a.cartItems, getCartTotal = _a.getCartTotal, getCartCount = _a.getCartCount;
+    var _b = (0, react_1.useState)(false), isExpanded = _b[0], setIsExpanded = _b[1];
+    var navigate = (0, react_router_dom_1.useNavigate)();
+    var handleViewCart = function () {
+        navigate('/cart');
+        setIsExpanded(false);
+    };
+    var handleCheckout = function () {
+        navigate('/cart');
+        setIsExpanded(false);
+    };
+    var cartCount = getCartCount();
+    var cartTotal = getCartTotal();
+    return ((0, jsx_runtime_1.jsxs)("div", { className: "cart-widget", children: [(0, jsx_runtime_1.jsxs)(framer_motion_1.motion.button, { className: "cart-toggle", onClick: function () { return setIsExpanded(!isExpanded); }, whileHover: { scale: 1.05 }, whileTap: { scale: 0.95 }, children: [(0, jsx_runtime_1.jsxs)("div", { className: "cart-icon", children: ["\uD83D\uDED2", cartCount > 0 && ((0, jsx_runtime_1.jsx)(framer_motion_1.motion.span, { className: "cart-badge", initial: { scale: 0 }, animate: { scale: 1 }, transition: { type: "spring", stiffness: 500, damping: 30 }, children: cartCount }))] }), (0, jsx_runtime_1.jsxs)("span", { className: "cart-info", children: [(0, jsx_runtime_1.jsxs)("div", { className: "cart-count", children: [cartCount, " \u0442\u043E\u0432\u0430\u0440\u043E\u0432"] }), (0, jsx_runtime_1.jsxs)("div", { className: "cart-total", children: [new Intl.NumberFormat('ru-RU').format(cartTotal), " \u20BD"] })] })] }), (0, jsx_runtime_1.jsx)(framer_motion_1.AnimatePresence, { children: isExpanded && ((0, jsx_runtime_1.jsxs)(framer_motion_1.motion.div, { className: "cart-dropdown", initial: { opacity: 0, y: -10, scale: 0.95 }, animate: { opacity: 1, y: 0, scale: 1 }, exit: { opacity: 0, y: -10, scale: 0.95 }, transition: { duration: 0.2 }, children: [(0, jsx_runtime_1.jsxs)("div", { className: "cart-dropdown-header", children: [(0, jsx_runtime_1.jsx)("h3", { children: "\u041A\u043E\u0440\u0437\u0438\u043D\u0430" }), (0, jsx_runtime_1.jsx)("button", { className: "close-btn", onClick: function () { return setIsExpanded(false); }, children: "\u2715" })] }), (0, jsx_runtime_1.jsx)("div", { className: "cart-dropdown-content", children: cartItems.length === 0 ? ((0, jsx_runtime_1.jsxs)("div", { className: "empty-cart", children: [(0, jsx_runtime_1.jsx)("p", { children: "\u041A\u043E\u0440\u0437\u0438\u043D\u0430 \u043F\u0443\u0441\u0442\u0430" }), (0, jsx_runtime_1.jsx)("span", { children: "\u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0442\u043E\u0432\u0430\u0440\u044B, \u0447\u0442\u043E\u0431\u044B \u0443\u0432\u0438\u0434\u0435\u0442\u044C \u0438\u0445 \u0437\u0434\u0435\u0441\u044C" })] })) : ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsxs)("div", { className: "cart-items", children: [cartItems.slice(0, 3).map(function (item) { return ((0, jsx_runtime_1.jsxs)("div", { className: "cart-item", children: [(0, jsx_runtime_1.jsxs)("div", { className: "item-info", children: [(0, jsx_runtime_1.jsx)("div", { className: "item-name", children: item.name }), (0, jsx_runtime_1.jsxs)("div", { className: "item-details", children: [(0, jsx_runtime_1.jsx)("span", { className: "item-type", children: item.type }), (0, jsx_runtime_1.jsxs)("span", { className: "item-quantity", children: ["\u00D7", item.quantity] })] })] }), (0, jsx_runtime_1.jsxs)("div", { className: "item-price", children: [new Intl.NumberFormat('ru-RU').format(item.price * item.quantity), " \u20BD"] })] }, item.id)); }), cartItems.length > 3 && ((0, jsx_runtime_1.jsxs)("div", { className: "more-items", children: ["\u0438 \u0435\u0449\u0435 ", cartItems.length - 3, " \u0442\u043E\u0432\u0430\u0440\u043E\u0432..."] }))] }), (0, jsx_runtime_1.jsx)("div", { className: "cart-summary", children: (0, jsx_runtime_1.jsxs)("div", { className: "summary-row", children: [(0, jsx_runtime_1.jsx)("span", { children: "\u0418\u0442\u043E\u0433\u043E:" }), (0, jsx_runtime_1.jsxs)("span", { className: "total-price", children: [new Intl.NumberFormat('ru-RU').format(cartTotal), " \u20BD"] })] }) }), (0, jsx_runtime_1.jsxs)("div", { className: "cart-actions", children: [(0, jsx_runtime_1.jsx)("button", { className: "btn-secondary", onClick: handleViewCart, children: "\u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u043A\u043E\u0440\u0437\u0438\u043D\u0443" }), (0, jsx_runtime_1.jsx)("button", { className: "btn-primary", onClick: handleCheckout, children: "\u041E\u0444\u043E\u0440\u043C\u0438\u0442\u044C \u0437\u0430\u043A\u0430\u0437" })] })] })) })] })) })] }));
+};
+exports.default = CartWidget;
