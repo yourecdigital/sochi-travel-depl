@@ -1,0 +1,42 @@
+[Unit]
+Description=Sochi Travel Application Stack
+Documentation=https://github.com/yourusername/sochi-travel-depl
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=sochi-travel
+Group=docker
+WorkingDirectory=/opt/sochi-travel
+ExecStartPre=/usr/bin/docker-compose -f /opt/sochi-travel/docker-compose.prod.yml config
+ExecStart=/usr/bin/docker-compose -f /opt/sochi-travel/docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker-compose -f /opt/sochi-travel/docker-compose.prod.yml down
+ExecReload=/usr/bin/docker-compose -f /opt/sochi-travel/docker-compose.prod.yml restart
+TimeoutStartSec=0
+Restart=on-failure
+RestartSec=30
+
+# Security settings
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/sochi-travel
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=32768
+
+# Environment
+Environment=NODE_ENV=production
+Environment=COMPOSE_PROJECT_NAME=sochi-travel
+
+[Install]
+WantedBy=multi-user.target
+

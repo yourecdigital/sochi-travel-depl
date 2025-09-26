@@ -1,0 +1,29 @@
+[Unit]
+Description=Sochi Travel Database Backup Service
+Documentation=https://github.com/yourusername/sochi-travel-depl
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=sochi-travel
+Group=docker
+WorkingDirectory=/opt/sochi-travel
+ExecStart=/opt/sochi-travel/scripts/backup-database.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sochi-travel-backup
+
+# Security settings
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/sochi-travel /opt/backups
+PrivateTmp=yes
+
+# Environment
+Environment=COMPOSE_PROJECT_NAME=sochi-travel
+
+[Install]
+WantedBy=multi-user.target
+

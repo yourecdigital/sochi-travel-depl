@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Sochi Travel Database Backup Daily
+Requires=sochi-travel-backup.service
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=3600
+
+[Install]
+WantedBy=timers.target
+

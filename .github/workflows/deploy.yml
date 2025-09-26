@@ -1,0 +1,311 @@
+name: CI/CD Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_API: ${{ github.repository }}/api
+  IMAGE_WEB: ${{ github.repository }}/web
+  DOCKER_BUILD_CONTEXT: .
+  DOCKER_COMPOSE_FILE: docker-compose.prod.yml
+
+jobs:
+  test:
+    name: Run unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/web/node_modules
+          key: ${{ runner.os }}-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-modules-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Web tests
+        working-directory: apps/web
+        run: npm test -- --run
+
+  build:
+    name: Build and push Docker images
+    runs-on: ubuntu-latest
+    needs: [test]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for API
+        id: meta_api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_API }}
+          tags: |
+            type=ref,event=branch
+            type=sha
+            type=raw,value=latest
+
+      - name: Extract metadata (tags, labels) for WEB
+        id: meta_web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_WEB }}
+          tags: |
+            type=ref,event=branch
+            type=sha
+            type=raw,value=latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile.prod
+          push: true
+          build-args: |
+            NODE_ENV=production
+            API_VERSION=${{ github.sha }}
+            BUILD_TIME=${{ github.run_id }}
+          tags: ${{ steps.meta_api.outputs.tags }}
+          labels: ${{ steps.meta_api.outputs.labels }}
+
+      - name: Build and push WEB image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile.prod
+          push: true
+          build-args: |
+            VITE_APP_VERSION=${{ github.sha }}
+            VITE_BUILD_TIME=${{ github.run_id }}
+          tags: ${{ steps.meta_web.outputs.tags }}
+          labels: ${{ steps.meta_web.outputs.labels }}
+
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: ${{ steps.expose.outputs.web_url }}
+    steps:
+      - name: Telegram notify start
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        if: env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        uses: appleboy/telegram-action@v1.0.0
+        with:
+          to: ${{ env.TELEGRAM_CHAT_ID }}
+          token: ${{ env.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            🚀 Deploy started
+            Repo: `${{ github.repository }}`
+            Commit: `${{ github.sha }}`
+
+      - name: Prepare deploy script
+        id: prep
+        run: |
+          cat > deploy.sh <<'EOS'
+          set -euo pipefail
+          export COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.prod.yml}
+          export PROJECT_DIR=${PROJECT_DIR:-/opt/sochi-travel}
+          export REGISTRY=ghcr.io
+          export IMAGE_API=${IMAGE_API}
+          export IMAGE_WEB=${IMAGE_WEB}
+
+          mkdir -p "$PROJECT_DIR"
+          cd "$PROJECT_DIR"
+
+          if [ ! -f .env ]; then
+            echo "ERROR: .env not found in $PROJECT_DIR" >&2
+            exit 1
+          fi
+
+          echo "==> Login to GHCR"
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+          echo "==> Create release tag"
+          RELEASE_TAG=$(date +%Y%m%d%H%M%S)-${GITHUB_SHA:0:7}
+          echo "RELEASE_TAG=$RELEASE_TAG" > .release
+
+          echo "==> Pull new images"
+          docker pull ${REGISTRY}/${IMAGE_API}:latest
+          docker pull ${REGISTRY}/${IMAGE_WEB}:latest
+
+          echo "==> Backup current compose file"
+          cp -f ${COMPOSE_FILE} ${COMPOSE_FILE}.bak || true
+
+          echo "==> Update images in compose overrides"
+          cat > docker-compose.override.yml <<EOC
+          services:
+            api:
+              image: ${REGISTRY}/${IMAGE_API}:latest
+            web:
+              image: ${REGISTRY}/${IMAGE_WEB}:latest
+          EOC
+
+          echo "==> Create DB backup"
+          if docker compose -f ${COMPOSE_FILE} ps mariadb | grep -q Up; then
+            docker compose -f ${COMPOSE_FILE} exec -T mariadb mysqldump -u root -p"$DB_ROOT_PASSWORD" --single-transaction --routines --triggers "$DB_NAME" > backup_${RELEASE_TAG}.sql || true
+          fi
+
+          echo "==> Deploy new stack"
+          docker compose -f ${COMPOSE_FILE} -f docker-compose.override.yml up -d
+
+          echo "==> Wait for API health"
+          for i in {1..30}; do
+            if curl -fsS http://localhost:4000/health >/dev/null; then
+              break
+            fi
+            sleep 5
+          done
+
+          echo "==> Run Prisma migrations"
+          docker compose -f ${COMPOSE_FILE} exec -T api npx prisma migrate deploy
+
+          echo "==> Run data migration script (if exists)"
+          if [ -f scripts/migrate.ts ]; then
+            docker compose -f ${COMPOSE_FILE} exec -T api node -e "import('./scripts/migrate.ts').catch(e=>{console.error(e);process.exit(1)})" || true
+          fi
+
+          echo "==> Verify web health"
+          curl -fsS http://localhost/health >/dev/null
+
+          echo "DEPLOY_OK"
+          EOS
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.1.0
+        env:
+          IMAGE_API: ${{ env.IMAGE_API }}
+          IMAGE_WEB: ${{ env.IMAGE_WEB }}
+          GITHUB_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          envs: IMAGE_API,IMAGE_WEB,GITHUB_SHA
+          script: |
+            set -euo pipefail
+            export COMPOSE_FILE=${{ env.DOCKER_COMPOSE_FILE }}
+            export PROJECT_DIR=/opt/sochi-travel
+            export REGISTRY=ghcr.io
+            export GHCR_USER=${{ github.actor }}
+            export GHCR_TOKEN=${{ secrets.GHCR_TOKEN }}
+            if [ -z "$GHCR_TOKEN" ]; then GHCR_TOKEN=${{ secrets.GITHUB_TOKEN }}; fi
+            echo "==> Ensure project dir"
+            mkdir -p "$PROJECT_DIR"
+            cd "$PROJECT_DIR"
+            if [ ! -f .env ]; then echo "ERROR: .env missing in $PROJECT_DIR" >&2; exit 1; fi
+            echo "==> Login to GHCR"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            echo "==> Release tag"
+            RELEASE_TAG=$(date +%Y%m%d%H%M%S)-${GITHUB_SHA:0:7}
+            echo "RELEASE_TAG=$RELEASE_TAG" > .release
+            echo "==> Pull images"
+            docker pull ${REGISTRY}/${IMAGE_API}:latest
+            docker pull ${REGISTRY}/${IMAGE_WEB}:latest
+            echo "==> Backup compose"
+            cp -f ${COMPOSE_FILE} ${COMPOSE_FILE}.bak || true
+            echo "==> Override images"
+            cat > docker-compose.override.yml <<EOC
+            services:
+              api:
+                image: ${REGISTRY}/${IMAGE_API}:latest
+              web:
+                image: ${REGISTRY}/${IMAGE_WEB}:latest
+            EOC
+            echo "==> DB backup"
+            if docker-compose -f ${COMPOSE_FILE} ps mariadb | grep -q Up; then
+              set +e
+              docker-compose -f ${COMPOSE_FILE} exec -T mariadb mysqldump -u root -p"$DB_ROOT_PASSWORD" --single-transaction --routines --triggers "$DB_NAME" > backup_${RELEASE_TAG}.sql
+              set -e
+            fi
+            echo "==> Deploy stack"
+            docker-compose -f ${COMPOSE_FILE} -f docker-compose.override.yml up -d
+            echo "==> Wait API"
+            for i in {1..30}; do
+              if curl -fsS http://localhost:4000/health >/dev/null; then break; fi; sleep 5; done
+            echo "==> Migrate DB (best-effort)"
+            set +e
+            docker-compose -f ${COMPOSE_FILE} exec -T api npx prisma migrate deploy || true
+            set -e
+            echo "==> Data migrate (optional)"
+            if [ -f scripts/migrate.ts ]; then
+              set +e
+              docker-compose -f ${COMPOSE_FILE} exec -T api node -e "import('./scripts/migrate.ts').catch(e=>{console.error(e);process.exit(1)})" || true
+              set -e
+            fi
+            echo "==> Verify web"
+            curl -fsS http://localhost/health >/dev/null
+            echo "DEPLOY_OK"
+
+      - name: Expose URL
+        id: expose
+        env:
+          PUBLIC_URL: ${{ secrets.PUBLIC_URL }}
+        run: |
+          if [ -z "$PUBLIC_URL" ]; then PUBLIC_URL="http://yourdomain"; fi
+          echo "web_url=$PUBLIC_URL" >> $GITHUB_OUTPUT
+
+      - name: Telegram notify success
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        if: success() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        uses: appleboy/telegram-action@v1.0.0
+        with:
+          to: ${{ env.TELEGRAM_CHAT_ID }}
+          token: ${{ env.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ✅ Deploy succeeded
+            URL: ${{ steps.expose.outputs.web_url }}
+            Commit: `${{ github.sha }}`
+
+      - name: Telegram notify failure
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        if: failure() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        uses: appleboy/telegram-action@v1.0.0
+        with:
+          to: ${{ env.TELEGRAM_CHAT_ID }}
+          token: ${{ env.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ❌ Deploy failed
+            Repo: `${{ github.repository }}`
+            Commit: `${{ github.sha }}`
+
+

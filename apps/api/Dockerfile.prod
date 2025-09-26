@@ -1,0 +1,146 @@
+# syntax=docker/dockerfile:1.7-labs
+
+# ===========================================
+# Stage 1: Dependencies
+# ===========================================
+FROM node:22-alpine AS deps
+WORKDIR /app
+
+# Install system dependencies
+RUN apk add --no-cache \
+    libc6-compat \
+    openssl \
+    ca-certificates
+
+# Copy package files for dependency resolution
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/
+
+# Install production dependencies only
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --only=production --ignore-scripts && \
+    npm cache clean --force
+
+# ===========================================
+# Stage 2: Build
+# ===========================================
+FROM node:22-alpine AS builder
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache \
+    libc6-compat \
+    openssl \
+    ca-certificates \
+    build-base \
+    python3 \
+    make \
+    g++
+
+# Copy package files
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+
+# Install all dependencies (including dev)
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# Copy Prisma schema
+COPY apps/api/prisma ./apps/api/prisma
+
+# Generate Prisma client
+RUN cd apps/api && npx prisma generate
+
+# Copy source code
+COPY apps/api/src ./apps/api/src
+COPY apps/api/tsconfig.json ./apps/api/
+COPY tsconfig.json ./
+
+# Build arguments
+ARG NODE_ENV=production
+ARG API_VERSION
+ARG BUILD_TIME
+
+# Set environment variables
+ENV NODE_ENV=$NODE_ENV
+ENV API_VERSION=$API_VERSION
+ENV BUILD_TIME=$BUILD_TIME
+
+# Build the application
+RUN cd apps/api && npm run build
+
+# ===========================================
+# Stage 3: Production runtime
+# ===========================================
+FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runtime
+
+# Set working directory
+WORKDIR /app
+
+# Create app user (already exists in distroless as nonroot)
+USER nonroot
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=512"
+
+# Copy production dependencies
+COPY --from=deps --chown=nonroot:nonroot /app/node_modules ./node_modules
+
+# Copy built application
+COPY --from=builder --chown=nonroot:nonroot /app/apps/api/dist ./apps/api/dist
+COPY --from=builder --chown=nonroot:nonroot /app/apps/api/prisma ./apps/api/prisma
+COPY --from=builder --chown=nonroot:nonroot /app/apps/api/node_modules/.prisma ./apps/api/node_modules/.prisma
+
+# Copy package.json for runtime
+COPY --from=builder --chown=nonroot:nonroot /app/package.json ./package.json
+COPY --from=builder --chown=nonroot:nonroot /app/apps/api/package.json ./apps/api/package.json
+
+# Create health check script
+COPY --chown=nonroot:nonroot <<EOF /app/healthcheck.js
+const http = require('http');
+
+const options = {
+  hostname: 'localhost',
+  port: 4000,
+  path: '/health',
+  method: 'GET',
+  timeout: 5000
+};
+
+const req = http.request(options, (res) => {
+  if (res.statusCode === 200) {
+    process.exit(0);
+  } else {
+    process.exit(1);
+  }
+});
+
+req.on('error', () => {
+  process.exit(1);
+});
+
+req.on('timeout', () => {
+  req.destroy();
+  process.exit(1);
+});
+
+req.end();
+EOF
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD ["node", "healthcheck.js"]
+
+# Expose port
+EXPOSE 4000
+
+# Labels for better container management
+LABEL maintainer="sochi-travel-team" \
+      version="1.0" \
+      description="Sochi Travel API Backend"
+
+# Start the application
+CMD ["apps/api/dist/index.js"]
+
