@@ -1,0 +1,197 @@
+# Monitoring Stack for Sochi Travel
+version: '3.8'
+
+services:
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: sochi-travel-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - sochi-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Alertmanager - Alert Handling
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: sochi-travel-alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - sochi-network
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: sochi-travel-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - sochi-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Node Exporter - System Metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: sochi-travel-node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - "9100:9100"
+    networks:
+      - sochi-network
+
+  # cAdvisor - Container Metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: sochi-travel-cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /cgroup:/cgroup:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - sochi-network
+
+  # Blackbox Exporter - Uptime Monitoring
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: sochi-travel-blackbox-exporter
+    restart: unless-stopped
+    ports:
+      - "9115:9115"
+    networks:
+      - sochi-network
+
+  # Nginx Exporter
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:latest
+    container_name: sochi-travel-nginx-exporter
+    restart: unless-stopped
+    command:
+      - '-nginx.scrape-uri=http://web:80/nginx_status'
+    ports:
+      - "9113:9113"
+    networks:
+      - sochi-network
+
+  # MySQL Exporter
+  mysql-exporter:
+    image: prom/mysqld-exporter:latest
+    container_name: sochi-travel-mysql-exporter
+    restart: unless-stopped
+    environment:
+      - DATA_SOURCE_NAME=root:${DB_ROOT_PASSWORD}@(mariadb:3306)/
+    ports:
+      - "9104:9104"
+    networks:
+      - sochi-network
+
+  # Redis Exporter
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: sochi-travel-redis-exporter
+    restart: unless-stopped
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    ports:
+      - "9121:9121"
+    networks:
+      - sochi-network
+
+  # MinIO Exporter
+  minio-exporter:
+    image: minio/minio:latest
+    container_name: sochi-travel-minio-exporter
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - sochi-network
+
+  # Webhook for Alerts
+  webhook:
+    image: adnanh/webhook:latest
+    container_name: sochi-travel-webhook
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/webhook:/etc/webhook:ro
+    ports:
+      - "5001:5001"
+    networks:
+      - sochi-network
+
+volumes:
+  prometheus_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  sochi-network:
+    external: true

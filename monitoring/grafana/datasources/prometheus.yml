@@ -1,3 +1,4 @@
+# Grafana Datasource Configuration for Prometheus
 apiVersion: 1
 
 datasources:
@@ -11,4 +12,7 @@ datasources:
       httpMethod: POST
       queryTimeout: 60s
       timeInterval: 15s
-
+      manageAlerts: true
+      alertmanagerUid: alertmanager
+    secureJsonData: {}
+    version: 1

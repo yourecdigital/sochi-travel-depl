@@ -1,0 +1,217 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Sochi Travel - Database Monitoring",
+    "tags": ["sochi-travel", "database", "mariadb", "redis"],
+    "style": "dark",
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "MariaDB Connection Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "mysql_up",
+            "legendFormat": "MariaDB Up"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Redis Connection Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "redis_up",
+            "legendFormat": "Redis Up"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Database Connections",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mysql_global_status_threads_connected",
+            "legendFormat": "Connected Threads"
+          },
+          {
+            "expr": "mysql_global_variables_max_connections",
+            "legendFormat": "Max Connections"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Connections"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "Database Queries",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mysql_global_status_queries[5m])",
+            "legendFormat": "Queries/sec"
+          },
+          {
+            "expr": "rate(mysql_global_status_slow_queries[5m])",
+            "legendFormat": "Slow Queries/sec"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Queries/sec"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Database Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mysql_global_status_innodb_buffer_pool_hit_rate",
+            "legendFormat": "Buffer Pool Hit Rate %"
+          },
+          {
+            "expr": "mysql_global_status_innodb_log_waits",
+            "legendFormat": "InnoDB Log Waits"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Performance"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 6,
+        "title": "Redis Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "redis_memory_used_bytes / 1024 / 1024",
+            "legendFormat": "Used Memory (MB)"
+          },
+          {
+            "expr": "redis_memory_max_bytes / 1024 / 1024",
+            "legendFormat": "Max Memory (MB)"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Memory (MB)"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 7,
+        "title": "Redis Operations",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(redis_commands_processed_total[5m])",
+            "legendFormat": "Commands/sec"
+          },
+          {
+            "expr": "rate(redis_keyspace_hits_total[5m])",
+            "legendFormat": "Keyspace Hits/sec"
+          },
+          {
+            "expr": "rate(redis_keyspace_misses_total[5m])",
+            "legendFormat": "Keyspace Misses/sec"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Operations/sec"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      },
+      {
+        "id": 8,
+        "title": "Database Size",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mysql_global_status_innodb_data_file_size_bytes / 1024 / 1024",
+            "legendFormat": "Data File Size (MB)"
+          },
+          {
+            "expr": "mysql_global_status_innodb_log_file_size_bytes / 1024 / 1024",
+            "legendFormat": "Log File Size (MB)"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Size (MB)"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+      },
+      {
+        "id": 9,
+        "title": "Database Locks",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mysql_global_status_innodb_row_lock_waits",
+            "legendFormat": "Row Lock Waits"
+          },
+          {
+            "expr": "mysql_global_status_innodb_deadlocks",
+            "legendFormat": "Deadlocks"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Count"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      }
+    ]
+  }
+}

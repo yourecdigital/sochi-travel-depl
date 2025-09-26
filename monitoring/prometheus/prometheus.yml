@@ -1,0 +1,146 @@
+# Prometheus Configuration for Sochi Travel
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'sochi-travel'
+    environment: 'production'
+
+rule_files:
+  - "rules/*.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 5s
+    metrics_path: /metrics
+
+  # Node.js API Application
+  - job_name: 'sochi-travel-api'
+    static_configs:
+      - targets: ['api:4000']
+    scrape_interval: 10s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+    honor_labels: true
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: api:4000
+
+  # Node.js Application Metrics (Custom)
+  - job_name: 'sochi-travel-api-custom'
+    static_configs:
+      - targets: ['api:4000']
+    scrape_interval: 15s
+    metrics_path: /api/metrics
+    scrape_timeout: 10s
+
+  # React Web Application (via Nginx)
+  - job_name: 'sochi-travel-web'
+    static_configs:
+      - targets: ['web:80']
+    scrape_interval: 30s
+    metrics_path: /nginx_status
+    scrape_timeout: 10s
+
+  # MariaDB Database
+  - job_name: 'sochi-travel-mariadb'
+    static_configs:
+      - targets: ['mariadb:3306']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+
+  # Redis Cache
+  - job_name: 'sochi-travel-redis'
+    static_configs:
+      - targets: ['redis:6379']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+
+  # MinIO S3 Storage
+  - job_name: 'sochi-travel-minio'
+    static_configs:
+      - targets: ['minio:9000']
+    scrape_interval: 30s
+    metrics_path: /minio/v2/metrics/cluster
+    scrape_timeout: 10s
+
+  # Docker Containers
+  - job_name: 'sochi-travel-docker'
+    static_configs:
+      - targets: ['docker:9323']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+
+  # Node Exporter (System Metrics)
+  - job_name: 'sochi-travel-node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+
+  # cAdvisor (Container Metrics)
+  - job_name: 'sochi-travel-cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+
+  # Nginx Exporter
+  - job_name: 'sochi-travel-nginx'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+
+  # Blackbox Exporter (Uptime Monitoring)
+  - job_name: 'sochi-travel-blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - http://web:80/health
+        - http://api:4000/health
+        - http://minio:9000/minio/health/live
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Grafana
+  - job_name: 'sochi-travel-grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+
+  # Alertmanager
+  - job_name: 'sochi-travel-alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    scrape_timeout: 10s

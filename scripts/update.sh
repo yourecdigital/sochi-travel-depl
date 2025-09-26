@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Sochi Travel - Application Deployment Script
-# Usage: ./scripts/deploy.sh [--force] [--skip-backup] [--skip-migration]
+# Sochi Travel - Application Update Script
+# Usage: ./scripts/update.sh [--force] [--skip-backup] [--restart-services]
 
 set -euo pipefail
 
@@ -10,27 +10,27 @@ PROJECT_NAME="sochi-travel"
 PROJECT_DIR="/opt/sochi-travel"
 BACKUP_DIR="/opt/backups/sochi-travel"
 COMPOSE_FILE="docker-compose.prod.yml"
-LOG_FILE="/var/log/sochi-travel-deploy.log"
+LOG_FILE="/var/log/sochi-travel-update.log"
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 
 # Parse arguments
-FORCE_DEPLOY=false
+FORCE_UPDATE=false
 SKIP_BACKUP=false
-SKIP_MIGRATION=false
+RESTART_SERVICES=true
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --force)
-            FORCE_DEPLOY=true
+            FORCE_UPDATE=true
             shift
             ;;
         --skip-backup)
             SKIP_BACKUP=true
             shift
             ;;
-        --skip-migration)
-            SKIP_MIGRATION=true
+        --restart-services)
+            RESTART_SERVICES=true
             shift
             ;;
         *)
@@ -88,7 +88,7 @@ send_telegram() {
 }
 
 check_prerequisites() {
-    log "Checking deployment prerequisites..."
+    log "Checking update prerequisites..."
     
     # Check if running as deploy user
     if [[ "$USER" != "deploy" ]]; then
@@ -123,77 +123,115 @@ check_prerequisites() {
     log "Prerequisites check passed"
 }
 
-backup_database() {
-    if [[ "$SKIP_BACKUP" == "true" ]]; then
-        log "Skipping database backup"
-        return
-    fi
-    
-    log "Creating database backup..."
-    
-    # Create backup directory with timestamp
-    local backup_timestamp=$(date +%Y%m%d_%H%M%S)
-    local backup_path="$BACKUP_DIR/db_backup_$backup_timestamp"
-    
-    mkdir -p "$backup_path"
-    
-    # Load environment variables
-    set -a
-    source "$PROJECT_DIR/.env"
-    set +a
-    
-    # Backup MariaDB
-    if docker-compose -f "$PROJECT_DIR/$COMPOSE_FILE" ps mariadb | grep -q "Up"; then
-        docker-compose -f "$PROJECT_DIR/$COMPOSE_FILE" exec -T mariadb \
-            mysqldump -u root -p"$DB_ROOT_PASSWORD" \
-            --single-transaction \
-            --routines \
-            --triggers \
-            --all-databases > "$backup_path/mariadb_backup.sql"
-        
-        log "Database backup created: $backup_path/mariadb_backup.sql"
-    else
-        warn "MariaDB container is not running. Skipping backup."
-    fi
-    
-    # Cleanup old backups (keep last 7 days)
-    find "$BACKUP_DIR" -name "db_backup_*" -type d -mtime +7 -exec rm -rf {} \; 2>/dev/null || true
-}
-
-pull_latest_changes() {
-    log "Pulling latest changes from repository..."
+check_for_updates() {
+    log "Checking for updates..."
     
     cd "$PROJECT_DIR"
     
     # Check if it's a git repository
     if [[ -d ".git" ]]; then
+        # Fetch latest changes
         git fetch origin
-        git reset --hard origin/main
-        log "Repository updated to latest version"
+        
+        # Check if there are updates
+        local current_commit=$(git rev-parse HEAD)
+        local remote_commit=$(git rev-parse origin/main)
+        
+        if [[ "$current_commit" == "$remote_commit" ]]; then
+            if [[ "$FORCE_UPDATE" != "true" ]]; then
+                log "No updates available. Use --force to update anyway."
+                exit 0
+            else
+                warn "No updates available, but force update requested"
+            fi
+        else
+            log "Updates available: $current_commit -> $remote_commit"
+        fi
+    else
+        warn "Not a git repository, skipping update check"
+    fi
+}
+
+create_backup() {
+    if [[ "$SKIP_BACKUP" == "true" ]]; then
+        log "Skipping backup"
+        return
+    fi
+    
+    log "Creating backup before update..."
+    
+    # Run backup script
+    if [[ -f "$PROJECT_DIR/scripts/backup.sh" ]]; then
+        "$PROJECT_DIR/scripts/backup.sh" --full
+        log "Backup completed successfully"
+    else
+        warn "Backup script not found, skipping backup"
+    fi
+}
+
+update_application() {
+    log "Updating application..."
+    
+    cd "$PROJECT_DIR"
+    
+    # Check if it's a git repository
+    if [[ -d ".git" ]]; then
+        # Stash any local changes
+        git stash push -m "Auto-stash before update $(date)"
+        
+        # Pull latest changes
+        git pull origin main
+        
+        log "Application updated to latest version"
     else
         warn "Not a git repository, skipping update"
     fi
 }
 
-build_images() {
-    log "Building Docker images..."
+update_dependencies() {
+    log "Updating dependencies..."
     
     cd "$PROJECT_DIR"
     
-    # Build images
-    docker-compose -f "$COMPOSE_FILE" build --no-cache
+    # Update npm dependencies
+    if [[ -f "package.json" ]]; then
+        info "Updating npm dependencies..."
+        npm ci
+        log "NPM dependencies updated"
+    fi
     
-    log "Docker images built successfully"
+    # Update Docker images
+    info "Pulling latest Docker images..."
+    docker-compose -f "$COMPOSE_FILE" pull
+    
+    log "Dependencies updated"
 }
 
-deploy_services() {
-    log "Deploying services..."
+build_application() {
+    log "Building application..."
+    
+    cd "$PROJECT_DIR"
+    
+    # Build Docker images
+    info "Building Docker images..."
+    docker-compose -f "$COMPOSE_FILE" build --no-cache
+    
+    log "Application built successfully"
+}
+
+restart_services() {
+    if [[ "$RESTART_SERVICES" != "true" ]]; then
+        log "Skipping service restart"
+        return
+    fi
+    
+    log "Restarting services..."
     
     cd "$PROJECT_DIR"
     
     # Stop existing services
     info "Stopping existing services..."
-    docker-compose -f "$COMPOSE_FILE" down || true
+    docker-compose -f "$COMPOSE_FILE" down
     
     # Start services
     info "Starting services..."
@@ -231,11 +269,6 @@ deploy_services() {
 }
 
 run_migrations() {
-    if [[ "$SKIP_MIGRATION" == "true" ]]; then
-        log "Skipping database migrations"
-        return
-    fi
-    
     log "Running database migrations..."
     
     cd "$PROJECT_DIR"
@@ -263,22 +296,22 @@ run_migrations() {
     # Run Prisma migrations
     info "Running Prisma migrations..."
     docker-compose -f "$COMPOSE_FILE" exec -T api npx prisma migrate deploy || {
-        warn "Prisma migrations failed, continuing with deployment"
+        warn "Prisma migrations failed, continuing with update"
     }
     
     # Run data migration script if exists
     if [[ -f "$PROJECT_DIR/scripts/migrate.ts" ]]; then
         info "Running data migration script..."
         docker-compose -f "$COMPOSE_FILE" exec -T api node -e "import('./scripts/migrate.ts').catch(e=>{console.error(e);process.exit(1)})" || {
-            warn "Data migration failed, continuing with deployment"
+            warn "Data migration failed, continuing with update"
         }
     fi
     
     log "Database migrations completed"
 }
 
-verify_deployment() {
-    log "Verifying deployment..."
+verify_update() {
+    log "Verifying update..."
     
     # Check API health
     if curl -f http://localhost:4000/health &> /dev/null; then
@@ -316,29 +349,49 @@ verify_deployment() {
         error "❌ MinIO health check failed"
     fi
     
-    log "All services are healthy! 🎉"
+    log "All services are healthy after update! 🎉"
 }
 
-show_deployment_status() {
-    log "Deployment completed successfully! 🚀"
+rollback_update() {
+    log "Rolling back update..."
+    
+    cd "$PROJECT_DIR"
+    
+    # Stop current services
+    docker-compose -f "$COMPOSE_FILE" down
+    
+    # Restore from git stash
+    if [[ -d ".git" ]]; then
+        git stash pop || warn "No stash to restore"
+    fi
+    
+    # Start previous version
+    docker-compose -f "$COMPOSE_FILE" up -d
+    
+    error "Update rollback completed"
+}
+
+show_update_status() {
+    log "Update completed successfully! 🚀"
     
     # Send Telegram notification
-    send_telegram "🚀 *Sochi Travel Deployed Successfully*
+    send_telegram "🚀 *Sochi Travel Update Completed*
 
-✅ Database backup created
-✅ Services updated and started
-✅ Health checks passed
-✅ Migrations completed
+✅ Application updated successfully
+✅ Services restarted and healthy
+✅ Database migrations completed
+✅ All health checks passed
 
-*Application URLs:*
-🌐 Web: http://$(hostname -I | awk '{print $1}')/
-🔌 API: http://$(hostname -I | awk '{print $1}'):4000/
-📊 MinIO: http://$(hostname -I | awk '{print $1}'):9001/
+*Update Details:*
+📦 Application: Updated to latest version
+🔄 Services: Restarted and running
+🗄️ Database: Migrations applied
+⏰ Completed: $(date)
 
 *Status:* All systems operational"
     
     echo ""
-    info "Deployment Status:"
+    info "Update Status:"
     cd "$PROJECT_DIR"
     docker-compose -f "$COMPOSE_FILE" ps
     
@@ -355,54 +408,36 @@ show_deployment_status() {
     echo "  🛑 Stop: docker-compose -f $COMPOSE_FILE down"
     echo "  📊 Status: docker-compose -f $COMPOSE_FILE ps"
     echo "  🔍 Health: curl http://localhost:4000/health"
-}
-
-rollback_deployment() {
-    log "Rolling back deployment..."
-    
-    cd "$PROJECT_DIR"
-    
-    # Stop current services
-    docker-compose -f "$COMPOSE_FILE" down
-    
-    # Restore from backup if available
-    local latest_backup=$(find "$BACKUP_DIR" -name "db_backup_*" -type d | sort | tail -1)
-    if [[ -n "$latest_backup" && -f "$latest_backup/mariadb_backup.sql" ]]; then
-        log "Restoring database from backup: $latest_backup"
-        # Note: Database restore would need to be implemented based on your backup strategy
-    fi
-    
-    # Start previous version
-    docker-compose -f "$COMPOSE_FILE" up -d
-    
-    error "Deployment rollback completed"
+    echo "  📈 Monitor: ./scripts/monitor.sh --alert"
 }
 
 main() {
-    log "Starting Sochi Travel deployment"
+    log "Starting Sochi Travel update process"
     
-    # Send deployment start notification
-    send_telegram "🚀 *Sochi Travel Deployment Started*
+    # Send update start notification
+    send_telegram "🚀 *Sochi Travel Update Started*
 
-📦 Building and deploying application
+📦 Updating application to latest version
 ⏰ Started at: $(date)
-🔄 Force mode: $FORCE_DEPLOY
+🔄 Force mode: $FORCE_UPDATE
 💾 Skip backup: $SKIP_BACKUP
-🗄️ Skip migration: $SKIP_MIGRATION"
+🔄 Restart services: $RESTART_SERVICES"
     
     # Set up error handling
-    trap 'error "Deployment failed at line $LINENO"' ERR
+    trap 'error "Update failed at line $LINENO"' ERR
     
     check_prerequisites
-    backup_database
-    pull_latest_changes
-    build_images
-    deploy_services
+    check_for_updates
+    create_backup
+    update_application
+    update_dependencies
+    build_application
+    restart_services
     run_migrations
-    verify_deployment
-    show_deployment_status
+    verify_update
+    show_update_status
     
-    log "Deployment completed successfully! 🚀"
+    log "Update process completed successfully! 🚀"
 }
 
 # Run main function

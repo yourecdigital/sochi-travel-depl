@@ -1,0 +1,150 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Sochi Travel - API Monitoring",
+    "tags": ["sochi-travel", "api", "nodejs"],
+    "style": "dark",
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "API Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"sochi-travel-api\"}[5m])",
+            "legendFormat": "{{ method }} {{ status }}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Requests/sec"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "API Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=\"sochi-travel-api\"}[5m]))",
+            "legendFormat": "50th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"sochi-travel-api\"}[5m]))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"sochi-travel-api\"}[5m]))",
+            "legendFormat": "99th percentile"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Response Time (s)"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "API Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"sochi-travel-api\",status=~\"5..\"}[5m]) / rate(http_requests_total{job=\"sochi-travel-api\"}[5m]) * 100",
+            "legendFormat": "5xx Error Rate %"
+          },
+          {
+            "expr": "rate(http_requests_total{job=\"sochi-travel-api\",status=~\"4..\"}[5m]) / rate(http_requests_total{job=\"sochi-travel-api\"}[5m]) * 100",
+            "legendFormat": "4xx Error Rate %"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Error Rate %"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "API Active Connections",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "nodejs_active_handles_total{job=\"sochi-travel-api\"}",
+            "legendFormat": "Active Handles"
+          },
+          {
+            "expr": "nodejs_active_requests_total{job=\"sochi-travel-api\"}",
+            "legendFormat": "Active Requests"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Count"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Node.js Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "nodejs_heap_size_used_bytes{job=\"sochi-travel-api\"} / 1024 / 1024",
+            "legendFormat": "Heap Used (MB)"
+          },
+          {
+            "expr": "nodejs_heap_size_total_bytes{job=\"sochi-travel-api\"} / 1024 / 1024",
+            "legendFormat": "Heap Total (MB)"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Memory (MB)"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Node.js Event Loop Lag",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "nodejs_eventloop_lag_seconds{job=\"sochi-travel-api\"}",
+            "legendFormat": "Event Loop Lag (s)"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Lag (seconds)"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      },
+      {
+        "id": 7,
+        "title": "API Endpoint Performance",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "topk(10, rate(http_requests_total{job=\"sochi-travel-api\"}[5m]))",
+            "legendFormat": "{{ endpoint }}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24}
+      }
+    ]
+  }
+}
